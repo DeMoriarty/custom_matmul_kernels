@@ -9,11 +9,13 @@ C : shape = ```[b, m, n]```, dtype = float32
 ### Benchmark
 #### Square matrices (```m = n = k```)
 <p float="left">
-  <img src="/imgs/1.png" width="100%"/>
+  <img src="/imgs/bmm_2.png" width="80%"/>
 </p>  
 
 #### Tall and skinny matrices (```k < m = n```)
-image here
+<p float="left">
+  <img src="/imgs/bmm_1.png" width="80%"/>
+</p>  
 
 ## Masked Batched Matrix Multiplication (MBMM)
 ``` C = (A * B) ⊙ M```
@@ -23,6 +25,18 @@ C : shape = ```[b, m, n]```, dtype = float32
 M : shape = ```[b, m, n]```, dtype = boolean  
 #### Mask Pattern
 ### Benchmark
-#### b, k fixed
-#### m, n, k fixed
-#### b, m, n fixed
+#### fixed b, k, varying m, n (m=n)
+<p float="left">
+  <img src="/imgs/mbmm_1.png" width="80%"/>
+</p>  
+#### fixed m, n, k, varying b
+<p float="left">
+  <img src="/imgs/mbmm_2.png" width="80%"/>
+</p>  
+<p float="left">
+  <img src="/imgs/bmm_3.png" width="80%"/>
+</p>  
+#### fixed b, m, n, varying k
+<p float="left">
+  <img src="/imgs/mbmm_4.png" width="80%"/>
+</p>  
