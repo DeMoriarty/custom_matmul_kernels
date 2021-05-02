@@ -33,6 +33,7 @@ M : shape = ```[b, m, n]```, dtype = boolean
 <p float="left">
   <img src="/imgs/mbmm_1.png" width="70%"/>
 </p>  
+
 #### fixed m, n, k, varying b  
 <p float="left">
   <img src="/imgs/mbmm_2.png" width="70%"/>
@@ -40,6 +41,7 @@ M : shape = ```[b, m, n]```, dtype = boolean
 <p float="left">
   <img src="/imgs/mbmm_3.png" width="70%"/>
 </p>  
+
 #### fixed b, m, n, varying k  
 <p float="left">
   <img src="/imgs/mbmm_4.png" width="70%"/>
