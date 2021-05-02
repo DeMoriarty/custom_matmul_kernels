@@ -2,7 +2,7 @@
 This repository contains custom matrix multiplication CUDA kernels and their pytorch wrappers.  
   
 ## Batched Matrix Multiplication (BMM)
-```C = A * B```  
+```C = A ⋅ B```  
 A : shape = ```[b, m, k]```, dtype = float32  
 B : shape = ```[b, k, n]```, dtype = float32  
 C : shape = ```[b, m, n]```, dtype = float32  
@@ -18,7 +18,7 @@ C : shape = ```[b, m, n]```, dtype = float32
 </p>  
 
 ## Masked Batched Matrix Multiplication (MBMM)
-``` C = (A * B) ⊙ M```
+``` C = (A ⋅ B) ⊙ M```  
 A : shape = ```[b, m, k]```, dtype = float32  
 B : shape = ```[b, k, n]```, dtype = float32  
 C : shape = ```[b, m, n]```, dtype = float32  
@@ -29,18 +29,18 @@ M : shape = ```[b, m, n]```, dtype = boolean
 </p>  
   
 ### Benchmark
-#### fixed b, k, varying m, n (m=n)
+#### fixed b, k, varying m, n (m=n)  
 <p float="left">
   <img src="/imgs/mbmm_1.png" width="70%"/>
 </p>  
-#### fixed m, n, k, varying b
+#### fixed m, n, k, varying b  
 <p float="left">
   <img src="/imgs/mbmm_2.png" width="70%"/>
 </p>  
 <p float="left">
-  <img src="/imgs/bmm_3.png" width="70%"/>
+  <img src="/imgs/mbmm_3.png" width="70%"/>
 </p>  
-#### fixed b, m, n, varying k
+#### fixed b, m, n, varying k  
 <p float="left">
   <img src="/imgs/mbmm_4.png" width="70%"/>
 </p>  
