@@ -1,7 +1,7 @@
 # Custom Matmul Kernels
 This repository contains custom matrix multiplication CUDA kernels and their pytorch wrappers.  
   
-## Batched Matrix Multiplication (BMM)
+## Batch Matrix Multiplication (BMM)
 ```C = A ⋅ B```  
 A : shape = ```[b, m, k]```, dtype = float32  
 B : shape = ```[b, k, n]```, dtype = float32  
@@ -17,7 +17,7 @@ C : shape = ```[b, m, n]```, dtype = float32
   <img src="/imgs/bmm_1.png" width="70%"/>
 </p>  
 
-## Masked Batched Matrix Multiplication (MBMM)
+## Masked Batch Matrix Multiplication (MBMM)
 ``` C = (A ⋅ B) ⊙ M```  
 A : shape = ```[b, m, k]```, dtype = float32  
 B : shape = ```[b, k, n]```, dtype = float32  
