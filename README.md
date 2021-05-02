@@ -8,7 +8,9 @@ B : shape = ```[b, k, n]```, dtype = float32
 C : shape = ```[b, m, n]```, dtype = float32  
 ### Benchmark
 #### Square matrices (```m = n = k```)
-image here
+<p float="left">
+  <img src="/imgs/1.png" width="100%"/>
+</p>  
 
 #### Tall and skinny matrices (```k < m = n```)
 image here
