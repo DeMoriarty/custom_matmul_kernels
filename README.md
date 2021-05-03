@@ -1,7 +1,7 @@
 # Custom Matmul Kernels
 This repository contains custom matrix multiplication CUDA kernels and their pytorch wrappers.  
   
-## What Can You Do With A Custom Matmul Kernel?
+## What can you do with a custom matmul kernel?
 - [Masked Batch Matrix Multiplication (MBMM)](#masked-batch-matrix-multiplication-mbmm)
 - [Fused Reduce & BMM](#fused-reduce--bmm)
 - [Sampled Softmax](#sampled-softmax)
