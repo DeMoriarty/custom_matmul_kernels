@@ -109,3 +109,5 @@ This method is implemented in [tensorflow](https://www.tensorflow.org/api_docs/p
 however, it only performs the sampling for each minibatch, hidden vectors of all tokens inside the minibatch is multiplied to the same set of output embeddings. 
 
 By modifying matmul kernel, we can **multiply the hidden vector of each token in the minibatch to a unique subset of output embeddings**
+
+to be continued...
