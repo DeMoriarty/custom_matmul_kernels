@@ -4,21 +4,22 @@ import numpy as np
 import math
 from custom_kernel import CustomKernel
 
-class MBMM(CustomKernel): 
+class MBMMCUDA(CustomKernel): 
   def __init__(self,
       m=None,
       n=None,
       k=None,
-      write_float8=True,
-      share_mask=False
+      patch_m = 4,
+      patch_n = 4,
+      share_mask=False,
     ):
-    super(MBMM, self).__init__()
-    assert type(write_float8) == bool
+    super(MBMMCUDA, self).__init__()
     assert type(share_mask) == bool
     self.m = m
     self.n = n
     self.k = k
-    self.write_float8 = write_float8
+    self.patch_m = patch_m
+    self.patch_n = patch_n
     self.share_mask = share_mask
     with open("kernels/mbmm_kernel.cu",'r') as f: ###
       self.kernel = f.read()
@@ -27,8 +28,9 @@ class MBMM(CustomKernel):
       .replace("_M_", str(m) if m else "M")
       .replace("_N_", str(n) if n else "N")
       .replace("_K_", str(k) if k else "K")
-      .replace("__WRITE_FLOAT8__", "true" if write_float8 else "false")
-      .replace("__MASK_BATCH__", "0" if share_mask else "bid")
+      .replace("_PM_", str(self.patch_m))
+      .replace("_PN_", str(self.patch_n))
+      .replace("__MASK_BID__", "0" if share_mask else "bid")
     )
     
     self._fn_tt = cp.RawKernel(
@@ -57,12 +59,6 @@ class MBMM(CustomKernel):
     )
 
   def _call_nn(self, A, B, block_mask, thread_mask, element_mask):
-    """
-      Performs C = A @ B
-      A: shape = [l, m, k]
-      B: shape = [l, k, n]
-      returns C: shape = [l, m, n]
-    """
     assert A.shape[0] == B.shape[0]
     assert A.shape[2] == B.shape[1]
     assert A.device.type == "cuda"
@@ -91,7 +87,12 @@ class MBMM(CustomKernel):
     C = torch.zeros(l, m, n, device="cuda:0", dtype=A.dtype)
 
     threads_per_block = (256,)
-    blocks_per_grid = (l, math.ceil(n/128), math.ceil(m/128))
+
+    # blocks_per_grid = (l, math.ceil(n/128), math.ceil(m/128))
+    n_ = math.ceil(n / (128 * self.patch_n))
+    m_ = math.ceil(m / (128 * self.patch_m))
+    blocks_per_grid = (self.patch_n * self.patch_m, n_ * m_, l)
+
 
     self._fn_nn(
       grid=blocks_per_grid,
@@ -110,167 +111,13 @@ class MBMM(CustomKernel):
     return C
 
   def _call_tt(self, A, B, block_mask, thread_mask, element_mask):
-    """
-      Performs C = A.t @ B.t
-      A: shape = [l, k, m]
-      B: shape = [l, n, k]
-      returns C: shape = [l, m, n]
-    """
-    assert A.shape[0] == B.shape[0]
-    assert A.shape[1] == B.shape[2]
-    assert A.device.type == "cuda"
-    assert B.device.type == "cuda"
-    assert A.dtype in (torch.float, torch.half)
-    assert B.dtype in (torch.float, torch.half)
-    
-    l, k, m = A.shape
-    l, n, k = B.shape
-    assert block_mask.dtype == torch.uint8 ###
-    assert thread_mask.dtype == torch.uint8 ###
-    assert element_mask.dtype == torch.uint8
-    if self.share_mask:
-      assert block_mask.shape == (math.ceil(m / 128), math.ceil(n / 128))  ###
-      assert thread_mask.shape == (math.ceil(m / 8), math.ceil(n / 8)) ###
-      assert element_mask.shape == (m, n)
-    else:
-      assert block_mask.shape == (l, math.ceil(m / 128), math.ceil(n / 128))  ###
-      assert thread_mask.shape == (l, math.ceil(m / 8), math.ceil(n / 8)) ###
-      assert element_mask.shape == (l, m, n)
-
-    if self.m is not None: assert m == self.m
-    if self.n is not None: assert n == self.n
-    if self.k is not None: assert k == self.k
-
-    C = torch.zeros(l, m, n, device="cuda:0", dtype=A.dtype)
-
-    threads_per_block = (256,)
-    blocks_per_grid = (l, math.ceil(n/128), math.ceil(m/128))
-
-    self._fn_tt(
-      grid=blocks_per_grid,
-      block=threads_per_block,
-      args=[
-        A.data_ptr(),
-        B.data_ptr(),
-        C.data_ptr(),
-        block_mask.data_ptr(),
-        thread_mask.data_ptr(),
-        element_mask.data_ptr(),
-        m, n, k
-      ],
-      stream=self.stream
-    )
-    return C
+    raise NotImplementedError
 
   def _call_tn(self, A, B, block_mask, thread_mask, element_mask):
-    """
-      Performs C = A.t @ B
-      A: shape = [l, k, m]
-      B: shape = [l, k, n]
-      returns C: shape = [l, m, n]
-    """
-    assert A.shape[0] == B.shape[0]
-    assert A.shape[1] == B.shape[1]
-    assert A.device.type == "cuda"
-    assert B.device.type == "cuda"
-    assert A.dtype in (torch.float, torch.half)
-    assert B.dtype in (torch.float, torch.half)
-
-    l, k, m = A.shape
-    l, k, n = B.shape
-    assert block_mask.dtype == torch.uint8 ###
-    assert thread_mask.dtype == torch.uint8 ###
-    assert element_mask.dtype == torch.uint8
-    if self.share_mask:
-      assert block_mask.shape == (math.ceil(m / 128), math.ceil(n / 128))  ###
-      assert thread_mask.shape == (math.ceil(m / 8), math.ceil(n / 8)) ###
-      assert element_mask.shape == (m, n)
-    else:
-      assert block_mask.shape == (l, math.ceil(m / 128), math.ceil(n / 128))  ###
-      assert thread_mask.shape == (l, math.ceil(m / 8), math.ceil(n / 8)) ###
-      assert element_mask.shape == (l, m, n)
-
-
-    if self.m is not None: assert m == self.m
-    if self.n is not None: assert n == self.n
-    if self.k is not None: assert k == self.k
-
-    C = torch.zeros(l, m, n, device="cuda", dtype=A.dtype)
-    
-    threads_per_block = (256,)
-    blocks_per_grid = (l, math.ceil(n/128), math.ceil(m/128))
-
-    self._fn_tn(
-      grid=blocks_per_grid,
-      block=threads_per_block,
-      args=[
-        A.data_ptr(),
-        B.data_ptr(),
-        C.data_ptr(),
-        block_mask.data_ptr(),
-        thread_mask.data_ptr(),
-        element_mask.data_ptr(),
-        m, n, k
-      ],
-      stream=self.stream,
-    )
-    return C
+    raise NotImplementedError
 
   def _call_nt(self, A, B, block_mask, thread_mask, element_mask):
-    """
-      Performs C = A @ B.t
-      A: shape = [l, m, k]
-      B: shape = [l, n, k]
-      block_mask: shape = [l, m/128, n/128]
-      thread_mask: shape = [l, m/8, n/8]
-      element_mask: shape = [l, m, n]
-      returns C: shape = [l, m, n]
-    """
-    assert A.shape[0] == B.shape[0]
-    assert A.shape[2] == B.shape[2]
-    assert A.device.type == "cuda"
-    assert B.device.type == "cuda"
-    assert A.dtype in (torch.float, torch.half)
-    assert B.dtype in (torch.float, torch.half)
-
-    l, m, k = A.shape
-    l, n, k = B.shape
-    assert block_mask.dtype == torch.uint8 ###
-    assert thread_mask.dtype == torch.uint8 ###
-    assert element_mask.dtype == torch.uint8
-    if self.share_mask:
-      assert block_mask.shape == (math.ceil(m / 128), math.ceil(n / 128))  ###
-      assert thread_mask.shape == (math.ceil(m / 8), math.ceil(n / 8)) ###
-      assert element_mask.shape == (m, n)
-    else:
-      assert block_mask.shape == (l, math.ceil(m / 128), math.ceil(n / 128))  ###
-      assert thread_mask.shape == (l, math.ceil(m / 8), math.ceil(n / 8)) ###
-      assert element_mask.shape == (l, m, n)
-
-    if self.m is not None: assert m == self.m
-    if self.n is not None: assert n == self.n
-    if self.k is not None: assert k == self.k
-
-    C = torch.zeros(l, m, n, device="cuda", dtype=A.dtype)
-
-    threads_per_block = (256,)
-    blocks_per_grid = (l, math.ceil(n/128), math.ceil(m/128))
-
-    self._fn_nt(
-      grid=blocks_per_grid,
-      block=threads_per_block,
-      args=[
-        A.data_ptr(),
-        B.data_ptr(),
-        C.data_ptr(),
-        block_mask.data_ptr(),
-        thread_mask.data_ptr(),
-        element_mask.data_ptr(),
-        m, n, k
-      ],
-      stream=self.stream
-    )
-    return C
+    raise NotImplementedError
 
   def __call__(
       self,
@@ -282,21 +129,21 @@ class MBMM(CustomKernel):
       mode="nn"
     ):
     """
-      Performs C = f(A) @ f(B)
+      Performs C = f(A) @ g(B)
       A:
         torch.Tensor
+        shape : [m, k] or [k, m] or [l, m, k] or [l, k, m]
         dtype : float32
-        shape : [l, m, k] or [l, k, m]
 
       B:
         torch.Tensor
+        shape : [n, k] or [k, n] or [l, n, k] or [l, k, n]
         dtype : float32
-        shape : [l, n, k] or [l, k, n]
 
       element_mask:
         mask of elements in C that are not computed
         torch.Tensor, dtype : uint8
-        if share_mask == True
+        if *share_mask* == True
           shape : [m, n]
         else
           shape : [l, m, n]
@@ -305,7 +152,7 @@ class MBMM(CustomKernel):
         mask of 128x128 blocks in C that are not computed
         torch.Tensor
         dtype : uint8
-        if share_mask == True
+        if *share_mask* == True
           shape : [ceil(m/128), ceil(n/128)]
         else
           shape : [l, ceil(m/128), ceil(n/128)]
@@ -314,20 +161,20 @@ class MBMM(CustomKernel):
         mask of 8x8 blocks in C that are not computed
         torch.Tensor
         dtype : uint8
-        if share_mask == True
+        if *share_mask* == True
           shape : [ceil(m/8), ceil(n/8)]
         else
           shape : [l, ceil(m/8), ceil(n/8)]
 
-      mode: str, default: "nn"
+      mode: {"nn", "tn", "nt", "tt"}, default: "nn"
 
       returns C:
         torch.Tensor
+        shape : [m, n] or [l, m, n]
         dtype : float32
-        shape : [l, m, n]
 
       Notes:
-        f() and g() are determined by mode
+        f() and g() are determined by *mode*
         "nn" --> A @ B
         "tt" --> A.T @ B.T
         "nt" --> A @ B.T

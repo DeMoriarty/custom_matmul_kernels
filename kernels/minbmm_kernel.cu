@@ -7,7 +7,6 @@
 
 typedef long long ll_t;
 typedef unsigned long long ull_t;
-typedef unsigned char uint8_t;
 
 typedef struct __builtin_align__(32) {
   float s0, s1, s2, s3, s4, s5, s6, s7;
@@ -17,6 +16,18 @@ typedef union {
   _float8 f8;
   float val[8];
 } float8;
+
+__device__ __forceinline__ float atomicMin(float *address, float val)
+{
+  int ret = __float_as_int(*address);
+  while(val < __int_as_float(ret))
+  {
+    int old = ret;
+    if((ret = atomicCAS((int *)address, old, __float_as_int(val))) == old)
+      break;
+  }
+  return __int_as_float(ret);
+}
 
 __device__ void init_cCache(
   float8 cCache[8]
@@ -83,15 +94,15 @@ __device__ void thread_matmul_v4(
 }
 
 __device__ void thread_matmul_v3(
-  _VOLATILE_ float aSM[8][128+4],
-  _VOLATILE_ float bSM[8][128+4],
+  _VOLATILE_ float aSM[16][128+4],
+  _VOLATILE_ float bSM[16][128+4],
   float8 cCache[8],
   int vx, int vy
 ) {
   float aCache[8];
 
   #pragma unroll
-  for (int ki=0; ki<8; ki++){
+  for (int ki=0; ki<16; ki++){
     #pragma unroll
     for (int mi=0; mi<8; mi++){
       aCache[mi] = aSM[ki][8*vy + mi];
@@ -108,25 +119,130 @@ __device__ void thread_matmul_v3(
   }
 }
 
-__device__ void mask_cCache(
+__device__ void min_dim_1(
   float8 cCache[8],
-  const uint8_t* ElementMask,
-  int gStartx,
-  int gStarty,
-  int vx, int vy, int bid,
+  _VOLATILE_ float valSM[16][128+4],
+  _VOLATILE_ float idxSM[16][128+4],
+  float* values,
+  ll_t* indices,
+  int gStartx, int gStarty, int tid, int bid,
   int M, int N
-) {
+){
+  int vx = tid % 16;
+  int vy = tid / 16;
+
   #pragma unroll
-  for (int i=0; i<8; i++){
-    int iM = gStarty + vy*8 + i;
-    if (likely(iM < M)){
-      #pragma unroll
-      for (int j=0; j<8; j++){
-        int iN = gStartx + vx*8 + j;
-        if (likely(iN < N)){
-          uint8_t element_mask = ElementMask[(__MASK_BID__)*M*N + (iM)*N + (iN)];
-          cCache[i].val[j] *= element_mask;
+  for (int ni = 0; ni < 8; ni++){
+    // initialize with first value
+    float value = cCache[0].val[ni];
+    float index = vy*8;
+
+    // Reduce within thread
+    #pragma unroll
+    for (int mi = 1; mi < 8; mi++){
+      float temp = cCache[mi].val[ni];
+      int iM = gStarty + vy*8 + mi;
+      if (likely(iM < M)){
+        if (temp < value){
+          value = temp;
+          index = vy*8 + mi;
         }
+      } else {
+        value = INFINITY;
+      }
+    }
+
+    // Store reduced values and indices in shared memory
+    valSM[vy][vx * 8 + ni] = value;
+    idxSM[vy][vx * 8 + ni] = index;
+  }
+  __syncthreads();
+
+  // first 128 threads do block wise reduction
+  if (tid < 128){
+    float value = valSM[0][tid];
+    float index = idxSM[0][tid];
+    
+    #pragma unroll
+    for (int i=1; i<16; i++){
+      float temp = valSM[i][tid];
+      if (temp < value){
+        value = temp;
+        index = idxSM[i][tid];
+      }
+    }
+    
+    // global reduction
+    int iN = gStartx + tid;
+    if (iN < N){
+      atomicMin(values + (bid) * N + iN, value);
+      if (value <= values[(bid) * N + iN]){
+        indices[(bid) * N + iN] = ll_t(index) + gStarty;
+      }
+    }
+    /*
+    */
+  }
+}
+
+__device__ void min_dim_2(
+  float8 cCache[8],
+  _VOLATILE_ float valSM[16][128+4],
+  _VOLATILE_ float idxSM[16][128+4],
+  float* values,
+  ll_t* indices,
+  int gStartx, int gStarty, int tid, int bid,
+  int M, int N
+){
+  int vx = tid % 16;
+  int vy = tid / 16;
+
+  #pragma unroll
+  for (int mi = 0; mi < 8; mi++){
+    // initialize with first value
+    float value = cCache[mi].val[0];
+    float index = vx*8;
+
+    // Reduce within thread
+    #pragma unroll
+    for (int ni = 1; ni < 8; ni++){
+      float temp = cCache[mi].val[ni];
+      int iN = gStartx + vx*8 + ni;
+      if (likely(iN < N)){
+        if (temp < value){
+          value = temp;
+          index = vx*8 + ni;
+        }
+      } else {
+        value = INFINITY;
+      }
+    }
+
+    // Store reduced values and indices in shared memory
+    valSM[vx][vy * 8 + mi] = value;
+    idxSM[vx][vy * 8 + mi] = index;
+  }
+  __syncthreads();
+
+  // first 128 threads do block-wise reduction
+  if (tid < 128){
+    float value = valSM[0][tid];
+    float index = idxSM[0][tid];
+    #pragma unroll
+    for (int i = 1; i < 16; i++){
+      float temp = valSM[i][tid];
+      if (temp < value){
+        value = temp;
+        index = idxSM[i][tid];
+      }
+    }
+
+    // global reduction
+    int iM = gStarty + tid;
+    if (iM < M){
+      atomicMin(values + (bid) * M + iM, value);
+      if (value <= values[(bid) * M + iM]){
+        indices[(bid) * M + iM] = ll_t(index) + gStartx;
       }
     }
   }
@@ -146,6 +262,19 @@ __device__ void write_c(
     if (likely(iM < M)){
       int iN_start = gStartx + vx*8;
       reinterpret_cast<float8*>(C + (bid)*M*N + (iM)*N + (iN_start))[0] = cCache[i];
+      /*
+      if (likely(iN_start + 7 < N)){
+        reinterpret_cast<float8*>(C + (bid)*M*N + (iM)*N + (iN_start))[0] = cCache[i];
+      } else {
+        #pragma unroll
+        for (int j=0; j<8; j++){
+          int iN = iN_start + j;
+          if (iN < N){
+            C[(bid)*M*N + (iM)*N + (iN)] = cCache[i].val[j];
+          }
+        }
+      }
+      */
     }
   }
 }
@@ -173,8 +302,7 @@ __device__ void write_c_v3(
         int iN = gStartx + 16*ni + vx;
         if (iN < N){
           float cVal = cSM[vy][16*ni + vx];
-          //store(C+(bid)*M*N + (iM)*N + (iN), cVal);
-          C[(bid)*M*N + (iM)*N + (iN)] = cVal;
+          store(C+(bid)*M*N + (iM)*N + (iN), cVal);
         }
       }
     }
@@ -182,47 +310,40 @@ __device__ void write_c_v3(
 }
 
 extern "C"
-__global__ void mbmm_tn(
+__global__ void min_bmm_tn(
   const float* __restrict__ A,
   const float* __restrict__ B,
-  float* __restrict__ C,
-  const uint8_t* __restrict__ BlockMask,
-  const uint8_t* __restrict__ ThreadMask,
-  const uint8_t* __restrict__ ElementMask,
-  int M, int N, int K
+  float* __restrict__ values,
+  ll_t* __restrict__ indices,
+  int M, int N, int K, int DIM
 ){
 }
 
 extern "C"
-__global__ void mbmm_nt(
+__global__ void min_bmm_nt(
   const float* __restrict__ A,
   const float* __restrict__ B,
-  float* __restrict__ C,
-  const uint8_t* __restrict__ BlockMask,
-  const uint8_t* __restrict__ ThreadMask,
-  const uint8_t* __restrict__ ElementMask,
-  int M, int N, int K
+  float* __restrict__ values,
+  ll_t* __restrict__ indices,
+  int M, int N, int K, int DIM
 ){
 }
 
 extern "C"
-__global__ void mbmm_nn(
+__global__ void min_bmm_nn(
   const float* __restrict__ A,
   const float* __restrict__ B,
-  float* __restrict__ C,
-  const uint8_t* __restrict__ BlockMask,
-  const uint8_t* __restrict__ ThreadMask,
-  const uint8_t* __restrict__ ElementMask,
-  int M, int N, int K
+  float* __restrict__ values,
+  ll_t* __restrict__ indices,
+  int M, int N, int K, int DIM
 ){
   int tid = threadIdx.x;     // thread idx
   int bid = blockIdx.z;      // batch idx
 
   // Neighboring blocks are grouped into PN x PM block groups in order to increase
-  // L1 cache hit rate.
+  // L1 cache hit rate
   // There are ceil(M/PM) x ceil(N/PN) block groups in total.
   // Blocks within block groups are indexed with blockIdx.x % PN and blockIdx.x / PN
-  
   int px = blockIdx.x % _PN_;
   int py = blockIdx.x / _PN_;
   int bDimX = (N + (128*_PN_) - 1) / (128*_PN_); 
@@ -234,7 +355,6 @@ __global__ void mbmm_nn(
   if (gStartx > N || gStarty > M){
     return;
   }
-
   // These are used to re-arrange threads into different shapes
   // for example: (256) -> (16, 16) -> (8, 32) -> (32, 8)
   int vx = tid % 16;
@@ -244,20 +364,9 @@ __global__ void mbmm_nn(
   int dx = tid % 8;
   int dy = tid / 8;
 
-  int bM = (M + 128 - 1) / 128;
-  int bN = (N + 128 - 1) / 128;
-  int tM = (M + 8 - 1) / 8;
-  int tN = (N + 8 - 1) / 8;
-  uint8_t block_mask = BlockMask[__MASK_BID__*bM*bN + (bIdxY)*bN + (bIdxX)];
-  uint8_t thread_mask = ThreadMask[__MASK_BID__*tM*tN + (bIdxY*16 + vy)*tN + (bIdxX*16 + vx) ];
-  if (block_mask == 0){
-    return;
-  }
+  __shared__ _VOLATILE_ float aSM[16][128+4];
+  __shared__ _VOLATILE_ float bSM[16][128+4];
 
-  __shared__ _VOLATILE_ float aSM1[8][128+4];
-  __shared__ _VOLATILE_ float bSM1[8][128+4];
-  __shared__ _VOLATILE_ float aSM2[8][128+4];
-  __shared__ _VOLATILE_ float bSM2[8][128+4];
   float aBuffer1[4];
   float bBuffer1[4];
   float aBuffer2[4];
@@ -310,10 +419,10 @@ __global__ void mbmm_nn(
     #pragma unroll
     for (int i=0; i<4; i++){
       // Store buffered tiles into shared memory
-      aSM1[dx][dy+i*32] = aBuffer1[i];
-      bSM1[wy][wx+i*32+i] = bBuffer1[i];
-      aSM2[dx][dy+i*32] = aBuffer2[i];
-      bSM2[wy][wx+i*32+i] = bBuffer2[i];
+      aSM[dx][dy+i*32] = aBuffer1[i];
+      bSM[wy][wx+i*32+i] = bBuffer1[i];
+      aSM[8 + dx][dy+i*32] = aBuffer2[i];
+      bSM[8 + wy][wx+i*32+i] = bBuffer2[i];
 
       // Start loading next 16*128 tile of A and B to buffer1 and buffer2.
       // Don't load anything on the last iteration.
@@ -349,38 +458,34 @@ __global__ void mbmm_nn(
         }
       }
     }
-    // synchroznie threads in order to make sure tiles of A and B are fully
+    // synchroznie threads in order make sure tiles of A and B are fully
     // loaded to shared memory.
     __syncthreads();
 
-    // Each thread computes 8 x 8 matrix multiplication
-    // Accumulating intermediate results in cCache
-    // aSM1, bSM1, aSM2, bSM2 are consumed
-    
-    if (thread_mask != 0){
-      thread_matmul_v3(aSM1, bSM1, cCache, vx, vy);
-      thread_matmul_v3(aSM2, bSM2, cCache, vx, vy);
-    }
+    thread_matmul_v3(aSM, bSM, cCache, vx, vy);
 
     // synchronize threads to signal that shared memory is consumed.
     __syncthreads();
   }
-  
-  // At the end of main loop, store cCache to C
-  if (0 < thread_mask < 64){
-    mask_cCache(cCache, ElementMask, gStartx, gStarty, vx, vy, bid, M, N);
+
+  // Reduce along DIM
+  if (DIM == 1){
+    min_dim_1(
+      cCache, aSM, bSM, values, indices,
+      gStartx, gStarty, tid, bid, M, N);
+  } else if (DIM == 2){
+    min_dim_2(
+      cCache, aSM, bSM, values, indices,
+      gStartx, gStarty, tid, bid, M, N);
   }
-  write_c_v3(cCache, C, gStartx, gStarty, vx, vy, bid, M, N);
 }
 
 extern "C"
-__global__ void mbmm_tt(
+__global__ void min_bmm_tt(
   const float* __restrict__ A,
   const float* __restrict__ B,
-  float* __restrict__ C,
-  const uint8_t* __restrict__ BlockMask,
-  const uint8_t* __restrict__ ThreadMask,
-  const uint8_t* __restrict__ ElementMask,
-  int M, int N, int K
+  float* __restrict__ values,
+  ll_t* __restrict__ indices,
+  int M, int N, int K, int DIM
 ){
 }
