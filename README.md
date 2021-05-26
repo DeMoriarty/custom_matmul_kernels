@@ -1,5 +1,5 @@
 # Custom Matmul Kernels
-This repository contains code for [this blog post](https://demoriarty.github.io/BMM-1/).
+This repository contains source code for [this blog post](https://demoriarty.github.io/BMM-1/).
 
 ## Dependency
 - Python 3.7.10 or higher
