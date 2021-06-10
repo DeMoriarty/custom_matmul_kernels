@@ -5,23 +5,34 @@ import math
 from custom_kernel import CustomKernel
 
 class TopkBMMCUDA(CustomKernel): 
-  def __init__(self, m=None, n=None, k=None, patch_m=4, patch_n=4):
+  def __init__(
+      self, patch_m=4, patch_n=4,
+      distance="inner"
+    ):
     super(TopkBMMCUDA, self).__init__()
-    self.m = m
-    self.n = n
-    self.k = k
     self.patch_m = patch_m
     self.patch_n = patch_n
+    if distance == "inner":
+      dist_fn = "madd"
+    elif distance in ["l2", "euclidean"]:
+      dist_fn = "squared_l2"
+    elif distance in ["l1", "manhattan"]:
+      dist_fn = "l1"
+    else:
+      ValueError("Unrecognized distance type")
+
+    self.distance = distance
+
+    with open("kernels/bmm_helpers.cu",'r') as f: ###
+      helpers = f.read()
     
-    with open("kernels/topkbmm_kernel.cu",'r') as f: ###
-      self.kernel = f.read()
+    with open("kernels/topkbmm.cu",'r') as f: ###
+      self.kernel = helpers + f.read()
       
     self.kernel = (self.kernel
-      .replace("_M_", str(m) if m else "M")
-      .replace("_N_", str(n) if n else "N")
-      .replace("_K_", str(k) if k else "K")
       .replace("_PM_", str(self.patch_m))
       .replace("_PN_", str(self.patch_n))
+      .replace("__DISTANCE_FN__", dist_fn)
     )
     
     self._fn_tt = cp.RawKernel(
@@ -55,36 +66,63 @@ class TopkBMMCUDA(CustomKernel):
       options=('--maxrregcount=128', '--use_fast_math')
     )
 
-  def _call_nn(self, A, B, n_candidates, dim):
+  def get_mode(self, A, B):
+    mode = [None, None]
+    if A.stride()[-1] == 1:
+      mode[0] = "n"
+    elif A.stride()[-2] == 1:
+      mode[0] = "t"
+    if B.stride()[-1] == 1:
+      mode[1] = "n"
+    elif B.stride()[-2] == 1:
+      mode[1] = "t"
+    return "".join(mode)
+
+  def __call__(self, A, B, k=128, dim=1):
     """
-      Performs C = A @ B
-      A: shape = [l, m, k]
-      B: shape = [l, k, n]
-      returns C: shape = [l, m, n]
+      Performs C = min(f(A) @ g(B)), argmin(f(A) @ g(B))
+      A: torch.Tensor, shape : [l, m, k]
+      B: torch.Tensor, shape : [l, k, n]
+      returns C: torch.Tensor, shape : [l, m, n]
     """
+    assert len(A.shape) == len(B.shape)
+    if len(A.shape) == 2 and len(B.shape) == 2:
+      A = A[None]
+      B = B[None]
+      two_dimentional = True
+      dim += 1
+    elif len(A.shape) == 3 and len(B.shape) == 3:
+      two_dimentional = False
+    else:
+      raise ValueError("shape of A and B need to be 2d or 3d")
     assert A.shape[0] == B.shape[0]
     assert A.shape[2] == B.shape[1]
-    assert A.device.type == "cuda"
-    assert B.device.type == "cuda"
-    assert A.dtype in (torch.float, torch.half)
-    assert B.dtype in (torch.float, torch.half)
+    assert A.dtype == B.dtype
+    assert A.dtype in [torch.float, torch.half]
+    assert A.device.type == B.device.type == "cuda"
     assert dim in [1, 2]
-    assert 0 < n_candidates <= 128
-    
-    l, m, k = A.shape
-    l, k, n = B.shape
+    assert 0 < k <= 128
 
-    if self.m is not None: assert m == self.m
-    if self.n is not None: assert n == self.n
-    if self.k is not None: assert k == self.k
+    mode = self.get_mode(A, B)
+    if mode == "nn":
+      kernel_fn = self._fn_nn
+    elif mode == "nt":
+      kernel_fn = self._fn_nt
+    elif mode == "tn":
+      kernel_fn = self._fn_tn
+    elif mode == "tt":
+      kernel_fn = self._fn_tt
+
+    l, m, d = A.shape
+    l, d, n = B.shape
 
     if dim == 1:
-      values = torch.empty([l, n, n_candidates], device="cuda:0", dtype=A.dtype)
-      indices = torch.empty([l, n, n_candidates], device="cuda:0", dtype=torch.int64)
+      values = torch.empty([l, n, 128], device="cuda:0", dtype=A.dtype)
+      indices = torch.empty([l, n, 128], device="cuda:0", dtype=torch.int64)
       mutex = torch.zeros([l, n], device="cuda:0", dtype=torch.int32)
     elif dim == 2:
-      values = torch.empty([l, m, n_candidates], device="cuda:0", dtype=A.dtype)
-      indices = torch.empty([l, m, n_candidates], device="cuda:0", dtype=torch.int64)
+      values = torch.empty([l, m, 128], device="cuda:0", dtype=A.dtype)
+      indices = torch.empty([l, m, 128], device="cuda:0", dtype=torch.int64)
       mutex = torch.zeros([l, m], device="cuda:0", dtype=torch.int32)
     values.fill_(float("-inf"))
 
@@ -96,7 +134,7 @@ class TopkBMMCUDA(CustomKernel):
     blocks_per_grid = (self.patch_n*self.patch_m, n_ * m_, l)
     # print(blocks_per_grid, m_, n_)
 
-    self._fn_nn(
+    kernel_fn(
       grid=blocks_per_grid,
       block=threads_per_block,
       args=[
@@ -105,83 +143,14 @@ class TopkBMMCUDA(CustomKernel):
         values.data_ptr(),
         indices.data_ptr(),
         mutex.data_ptr(),
-        m, n, k, dim, n_candidates
+        m, n, d, dim, 128
       ],
       stream=self.stream
     )
-    return values, indices
+    indices = indices[:, :, :k]
+    values = values[:, :, :k]
 
-  def _call_tt(self, A, B, n_candidates, dim):
-    raise NotImplementedError
-
-  def _call_tn(self, A, B, n_candidates, dim):
-    raise NotImplementedError
-
-  def _call_nt(self, A, B, n_candidates, dim):
-    raise NotImplementedError
-
-  def __call__(self, A, B, k=128, dim=1, mode="nn"):
-    """
-      Performs topk( f(A) @ g(B), dim=dim)
-
-      A:
-        torch.Tensor
-        shape : [l, m, d] or [l, d, m]
-        dtype : float32
-
-      B:
-        torch.Tensor
-        shape : [l, n, d] or [l, d, n]
-        dtype : float32
-      
-      dim: {0, 1, 2}
-        the dimention to sort along
-        when inputs have 2 dimentions, *dim* can be 0 or 1
-        when inputs have 3 dimentions, *dim* can be 1 or 2, 0 is not supported.
-
-      mode: {"nn", "tn", "nt", "tt"}, default: "nn"
-      
-      returns: (topk_values, topk_indices)
-        topk_values:
-          torch.Tensor
-          shape : [n, k] or [l, n, k] or [m, k] or [l, m, k] depending on *dim*
-          dtype : float32
-
-        topk_indices:
-          torch.Tensor
-          shape : [n, k] or [l, n, k] or [m, k] or [l, m, k] depending on *dim*
-          dtype : int64
-
-      Notes:
-        f() and g() are determined by mode
-        "nn" --> A @ B
-        "tt" --> A.T @ B.T
-        "nt" --> A @ B.T
-        "tn" --> A.T @ B
-    """
-    assert len(A.shape) == len(B.shape)
-    A = A.contiguous()
-    B = B.contiguous()
-    if len(A.shape) == 2 and len(B.shape) == 2:
-      A2 = A[None]
-      B2 = B[None]
-      dim += 1
-    elif len(A.shape) == 3 and len(B.shape) == 3:
-      A2 = A
-      B2 = B
-    else:
-      raise ValueError("shape of A and B need to be 2d or 3d")
-
-    if mode == "nn":
-      values, indices = self._call_nn(A2, B2, k, dim)
-    elif mode == "tt":
-      values, indices = self._call_tt(A2, B2, k, dim)
-    elif mode == "tn":
-      values, indices = self._call_tn(A2, B2, k, dim)
-    elif mode == "nt":
-      values, indices = self._call_nt(A2, B2, k, dim)
-
-    if len(A.shape) == 2 and len(B.shape) == 2:
+    if two_dimentional:
       indices = indices[0]
       values = values[0]
 

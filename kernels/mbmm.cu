@@ -271,26 +271,26 @@ __global__ void mbmm_nn(
   for (int i=0; i<4; i++){
     int iM = gStarty + dy + i*32;
     int iN = gStartx + wx + i*32;
-    if (likely(iM < _M_)){
-      if (likely(dx < _K_)){
-        aBuffer1[i] = load(A + (bid)*_M_*_K_ + (iM)*_K_ + (dx));
+    if (likely(iM < M)){
+      if (likely(dx < K)){
+        aBuffer1[i] = load(A + (bid)*M*K + (iM)*K + (dx));
       } else {
         aBuffer1[i] = 0.f;
       }
-      if (likely(dx+8 < _K_)){
-        aBuffer2[i] = load(A + (bid)*_M_*_K_ + (iM)*_K_ + (dx+8));
+      if (likely(dx+8 < K)){
+        aBuffer2[i] = load(A + (bid)*M*K + (iM)*K + (dx+8));
       } else {
         aBuffer2[i] = 0.f;
       }
     }
     if (likely(iN < N)){
-      if (likely(wy < _K_)){
-        bBuffer1[i] = load(B + (bid)*_N_*_K_ + (wy)*_N_ + (iN));
+      if (likely(wy < K)){
+        bBuffer1[i] = load(B + (bid)*N*K + (wy)*N + (iN));
       } else {
         bBuffer1[i] = 0.f;
       }
-      if (likely(wy+8 < _K_)){
-        bBuffer2[i] = load(B + (bid)*_N_*_K_ + (wy+8)*_N_ + (iN));
+      if (likely(wy+8 < K)){
+        bBuffer2[i] = load(B + (bid)*N*K + (wy+8)*N + (iN));
       } else {
         bBuffer2[i] = 0.f;
       }
@@ -298,7 +298,7 @@ __global__ void mbmm_nn(
   }
 
   // Number of main loop iterations is ceil(k/16)
-  int nIt = (_K_ + 16 - 1) / 16;
+  int nIt = (K + 16 - 1) / 16;
   #pragma unroll
   for (int itr=0; itr<nIt; itr++){
     int gStartk = itr * 16;
@@ -322,27 +322,27 @@ __global__ void mbmm_nn(
         int iM = gStarty + i*32 + dy;
         int iN = gStartx + i*32 + wx;
         
-        if (likely(iM < _M_)){
-          if (likely(iKA < _K_)){
-            aBuffer1[i] = load(A + (bid)*_M_*_K_ + (iM)*_K_ + (iKA));
+        if (likely(iM < M)){
+          if (likely(iKA < K)){
+            aBuffer1[i] = load(A + (bid)*M*K + (iM)*K + (iKA));
           } else {
             aBuffer1[i] = 0.f;
           }
-          if (likely(iKA+8 < _K_)){
-            aBuffer2[i] = load(A + (bid)*_M_*_K_ + (iM)*_K_ + (iKA+8));
+          if (likely(iKA+8 < K)){
+            aBuffer2[i] = load(A + (bid)*M*K + (iM)*K + (iKA+8));
           } else {
             aBuffer2[i] = 0.f;
           }
         }
 
-        if (likely(iN < _N_)){
-          if (likely(iKB < _K_)){
-            bBuffer1[i] = load(B + (bid)*_N_*_K_ + (iKB)*_N_ + (iN));
+        if (likely(iN < N)){
+          if (likely(iKB < K)){
+            bBuffer1[i] = load(B + (bid)*N*K + (iKB)*N + (iN));
           } else {
             bBuffer1[i] = 0.f;
           }
-          if (likely(iKB+8 < _K_)){
-            bBuffer2[i] = load(B + (bid)*_N_*_K_ + (iKB+8)*_N_ + (iN));
+          if (likely(iKB+8 < K)){
+            bBuffer2[i] = load(B + (bid)*N*K + (iKB+8)*N + (iN));
           } else {
             bBuffer2[i] = 0.f;
           }
