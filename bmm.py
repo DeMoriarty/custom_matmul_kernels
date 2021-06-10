@@ -67,17 +67,10 @@ class BMMCUDA(CustomKernel):
 
   def __call__(self, A, B):
     """
-      Performs C = f(A) @ f(B)
+      Performs C = f(A) @ g(B)
       A: torch.Tensor, shape : [l, m, k] or [l, k, m]
       B: torch.Tensor, shape : [l, n, k] or [l, k, n]
       returns C: torch.Tensor, shape : [l, m, n]
-      mode: str, default: "nn"
-      Notes:
-        f() and g() are determined by mode
-        "nn" --> A @ B
-        "tt" --> A.T @ B.T
-        "nt" --> A @ B.T
-        "tn" --> A.T @ B
     """
     assert len(A.shape) == len(B.shape)
     # A = A.contiguous()

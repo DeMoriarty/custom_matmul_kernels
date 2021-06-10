@@ -78,15 +78,9 @@ class MinBMMCUDA(CustomKernel):
   def __call__(self, A, B, dim=1):
     """
       Performs C = min(f(A) @ g(B)), argmin(f(A) @ g(B))
-      A: torch.Tensor, shape : [l, m, k] or [l, k, m]
-      B: torch.Tensor, shape : [l, n, k] or [l, k, n]
+      A: torch.Tensor, shape : [l, m, k]
+      B: torch.Tensor, shape : [l, k, n]
       returns C: torch.Tensor, shape : [l, m, n]
-      Notes:
-        f() and g() are determined by mode
-        "nn" --> A @ B
-        "tt" --> A.T @ B.T
-        "nt" --> A @ B.T
-        "tn" --> A.T @ B
     """
     assert len(A.shape) == len(B.shape)
     if len(A.shape) == 2 and len(B.shape) == 2:

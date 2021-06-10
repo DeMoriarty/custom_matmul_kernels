@@ -6,18 +6,12 @@ from custom_kernel import CustomKernel
 
 class MBMMCUDA(CustomKernel): 
   def __init__(self,
-      m=None,
-      n=None,
-      k=None,
       patch_m = 4,
       patch_n = 4,
       share_mask=False,
     ):
     super(MBMMCUDA, self).__init__()
     assert type(share_mask) == bool
-    self.m = m
-    self.n = n
-    self.k = k
     self.patch_m = patch_m
     self.patch_n = patch_n
     self.share_mask = share_mask
@@ -25,9 +19,6 @@ class MBMMCUDA(CustomKernel):
       self.kernel = f.read()
       
     self.kernel = (self.kernel
-      .replace("_M_", str(m) if m else "M")
-      .replace("_N_", str(n) if n else "N")
-      .replace("_K_", str(k) if k else "K")
       .replace("_PM_", str(self.patch_m))
       .replace("_PN_", str(self.patch_n))
       .replace("__MASK_BID__", "0" if share_mask else "bid")
@@ -79,10 +70,6 @@ class MBMMCUDA(CustomKernel):
       assert block_mask.shape == (l, math.ceil(m / 128), math.ceil(n / 128))  ###
       assert thread_mask.shape == (l, math.ceil(m / 8), math.ceil(n / 8)) ###
       assert element_mask.shape == (l, m, n)
-
-    if self.m is not None: assert m == self.m
-    if self.n is not None: assert n == self.n
-    if self.k is not None: assert k == self.k
     
     C = torch.zeros(l, m, n, device="cuda:0", dtype=A.dtype)
 
