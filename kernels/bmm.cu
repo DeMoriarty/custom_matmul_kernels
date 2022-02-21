@@ -9,7 +9,7 @@ __global__ void bmm_tn(
   int bid = blockIdx.z;      // batch idx
 
   // Neighboring blocks are grouped into PN x PM block groups in order to increase
-  // L1 cache hit rate
+  // L2 cache hit rate
   // There are ceil(M/PM) x ceil(N/PN) block groups in total.
   // Blocks within block groups are indexed with blockIdx.x % PN and blockIdx.x / PN
   int px = blockIdx.x % _PN_;
@@ -101,7 +101,7 @@ __global__ void bmm_nt(
   int bid = blockIdx.z;      // batch idx
 
   // Neighboring blocks are grouped into PN x PM block groups in order to increase
-  // L1 cache hit rate
+  // L2 cache hit rate
   // There are ceil(M/PM) x ceil(N/PN) block groups in total.
   // Blocks within block groups are indexed with blockIdx.x % PN and blockIdx.x / PN
   int px = blockIdx.x % _PN_;
@@ -192,7 +192,7 @@ __global__ void bmm_nn(
   int bid = blockIdx.z;      // batch idx
 
   // Neighboring blocks are grouped into PN x PM block groups in order to increase
-  // L1 cache hit rate
+  // L2 cache hit rate
   // There are ceil(M/PM) x ceil(N/PN) block groups in total.
   // Blocks within block groups are indexed with blockIdx.x % PN and blockIdx.x / PN
   int px = blockIdx.x % _PN_;
@@ -284,7 +284,7 @@ __global__ void bmm_tt(
   int bid = blockIdx.z;      // batch idx
 
   // Neighboring blocks are grouped into PN x PM block groups in order to increase
-  // L1 cache hit rate
+  // L2 cache hit rate
   // There are ceil(M/PM) x ceil(N/PN) block groups in total.
   // Blocks within block groups are indexed with blockIdx.x % PN and blockIdx.x / PN
   int px = blockIdx.x % _PN_;
