@@ -114,7 +114,7 @@ __global__ void bmm_nt(
   int gStarty = bIdxY * 128;   // starting index of block on M axis
   if (gStartx > N || gStarty > M){
     return;
-  } K
+  }
   // These are used to re-arrange threads into different shapes
   // for example: (256) -> (16, 16) -> (8, 32) -> (32, 8)
   int vx = tid % 16;
