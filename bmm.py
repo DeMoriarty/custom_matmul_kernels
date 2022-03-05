@@ -79,10 +79,8 @@ class BMMCUDA(CustomKernel):
       A = A[None]
       B = B[None]
       two_dimentional = True
-      dim += 1
     elif len(A.shape) == 3 and len(B.shape) == 3:
       two_dimentional = False
-      pass
     else:
       raise ValueError("A and B need to be 2d or 3d")
     assert A.shape[0] == B.shape[0]
